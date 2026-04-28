@@ -1,11 +1,11 @@
 """
 Clip Fetcher — Sport Bot DE
 ============================
-3-stufige Suche:
-  Phase 1 — YouTube, Spieler-spezifisch (yt-dlp ytsearch5)
-  Phase 2 — YouTube generisch + Dailymotion API (kein Key nötig)
-  Phase 3 — Pexels Stock-Video API (PEXELS_API_KEY in Railway)
-Kein Gradient-Fallback — lieber Job abbrechen als Müll posten.
+3-phase search:
+  Phase 1 — YouTube, player-specific (yt-dlp ytsearch5)
+  Phase 2 — YouTube generic + Dailymotion API (no key needed)
+  Phase 3 — Pexels Stock Video API (PEXELS_API_KEY in Railway)
+No gradient fallback — better to abort job than post garbage.
 """
 
 import json
@@ -24,7 +24,7 @@ logger = logging.getLogger("syncin")
 _cookie_file: str | None = None
 
 def _get_cookie_file() -> str | None:
-    """Schreibt YOUTUBE_COOKIES env var einmalig in eine Temp-Datei, gibt Pfad zurück."""
+    """Write YOUTUBE_COOKIES env var to a temp file once, return path."""
     global _cookie_file
     if _cookie_file and Path(_cookie_file).exists():
         return _cookie_file
@@ -38,26 +38,26 @@ def _get_cookie_file() -> str | None:
         f.write(cookies)
         f.close()
         _cookie_file = f.name
-        logger.info(f"[clip] Cookie-Datei geschrieben: {_cookie_file}")
+        logger.info(f"[clip] Cookie file written: {_cookie_file}")
     except Exception as e:
-        logger.warning(f"[clip] Cookie-Datei Fehler: {e}")
+        logger.warning(f"[clip] Cookie file error: {e}")
         return None
     return _cookie_file
 
-# ── Query-Templates ───────────────────────────────────────────────────────────
+# ── Query Templates ───────────────────────────────────────────────────────────
 
-# Phase 1 — Spieler-spezifisch, geringes Copyright-Risiko
-# Pressekonferenzen, Training, Interviews = Club-eigener Content, selten geclaimt
+# Phase 1 — Player-specific, low copyright risk
+# Press conferences, training, interviews = club-owned content, rarely claimed
 PLAYER_QUERIES = {
-    "fussball": [
-        "{player} Pressekonferenz",
-        "{player} Training",
-        "{player} Interview 2025",
+    "soccer": [
         "{player} press conference",
-        "{player} Trainingseinheit",
-        "{player} Spieler Interview",
+        "{player} training session",
+        "{player} interview 2025",
+        "{player} training ground",
+        "{player} media conference",
         "{player} pre-match press conference",
-        "{player} nach dem Spiel Interview",
+        "{player} post-match interview",
+        "{player} training footage",
     ],
     "nba": [
         "{player} press conference",
@@ -67,6 +67,7 @@ PLAYER_QUERIES = {
         "{player} practice footage",
         "{player} interview 2025",
         "{player} NBA media session",
+        "{player} locker room interview",
     ],
     "nfl": [
         "{player} press conference",
@@ -75,76 +76,104 @@ PLAYER_QUERIES = {
         "{player} practice footage",
         "{player} media day",
         "{player} training camp",
+        "{player} pregame interview",
+        "{player} NFL media session",
     ],
 }
 
-# Phase 2 — Vereins-/Teamebene, ebenfalls geringes Copyright-Risiko
+# Phase 2 — Club/team level, still low copyright risk
 GENERIC_YT_QUERIES = {
-    "fussball": [
-        "{player} Verein Training",
-        "{player} Vereins Pressekonferenz",
-        "Fussball Spieler Interview 2025",
-        "Bundesliga Pressekonferenz 2025",
-        "Fussball Training Einheit",
-        "Fussball Spieler Pressekonferenz",
-        "Trainer Pressekonferenz Bundesliga",
-        "Fussball Media Day 2025",
+    "soccer": [
+        "{player} club training session",
+        "{player} team press conference",
+        "soccer player interview 2025",
+        "football training ground footage",
+        "soccer pre-match press conference",
+        "football manager press conference 2025",
+        "soccer player media day",
+        "football training session 2025",
     ],
     "nba": [
-        "{player} Team Practice",
-        "NBA Spieler Pressekonferenz 2025",
-        "Basketball Spieler Interview 2025",
-        "NBA Media Day 2025",
-        "Basketball Training Footage",
-        "NBA Postgame Interview",
+        "{player} team practice",
+        "NBA player press conference 2025",
+        "basketball player interview 2025",
+        "NBA media day 2025",
+        "basketball practice footage 2025",
+        "NBA player postgame interview",
+        "basketball player media session",
     ],
     "nfl": [
-        "{player} Team Pressekonferenz",
-        "NFL Spieler Interview 2025",
-        "Football Pressekonferenz",
-        "NFL Training Camp 2025",
-        "NFL Media Day 2025",
+        "{player} team press conference",
+        "NFL player interview 2025",
+        "football player press conference",
+        "NFL training camp footage 2025",
+        "NFL media day 2025",
+        "football player postgame interview",
     ],
 }
 
-# Dailymotion — risikoarmer Content
+# Dailymotion — lower risk content
 DAILYMOTION_QUERIES = {
-    "fussball": [
+    "soccer": [
         "football press conference",
         "soccer player interview",
         "football training session",
         "soccer media day",
-        "fussball pressekonferenz",
+        "football manager interview",
     ],
     "nba": [
         "nba press conference",
         "basketball player interview",
         "nba media day",
+        "basketball practice",
     ],
     "nfl": [
         "nfl press conference",
         "football player interview",
         "nfl training camp",
+        "nfl media day",
     ],
 }
 
 PEXELS_QUERIES = {
-    "fussball": ["soccer player", "football game", "soccer match", "football stadium"],
-    "nba":      ["basketball player", "basketball game", "basketball court", "basketball dunk"],
-    "nfl":      ["american football", "football game", "football player", "football stadium"],
+    "soccer": [
+        "soccer player", "football game", "soccer match", "football stadium",
+        "soccer crowd cheering", "football training", "soccer dribbling",
+        "football skills", "soccer referee", "football pitch aerial",
+        "soccer fans stadium", "football kick", "soccer goal celebration",
+        "football warm up", "soccer night game", "football crowd",
+        "soccer player running", "football tackle", "stadium lights sport",
+        "soccer ball", "football penalty kick", "sport stadium crowd",
+    ],
+    "nba": [
+        "basketball player", "basketball game", "basketball court", "basketball dunk",
+        "basketball crowd", "basketball training", "basketball shooting",
+        "basketball pass", "basketball arena", "nba court lights",
+        "basketball player running", "basketball slam dunk", "indoor sport arena",
+        "basketball warm up", "basketball fans cheering", "sport arena crowd",
+        "basketball referee", "basketball defense", "basketball fast break",
+    ],
+    "nfl": [
+        "american football", "football game", "football player", "football stadium",
+        "american football crowd", "football training", "football helmet",
+        "football tackle", "football touchdown", "sport stadium aerial",
+        "football fans cheering", "football field lights", "american football team",
+        "football warm up", "sport crowd stadium", "football quarterback",
+        "american football action", "football coach", "sport arena night",
+    ],
 }
 
-# ── Highlight-Queries — TikTok + Instagram (hohes Engagement, YouTube Content ID Risiko)
+# ── Highlight queries — TikTok + Instagram (high engagement, YT Content ID risk)
 PLAYER_QUERIES_HIGHLIGHTS = {
-    "fussball": [
-        "{player} Highlights 2025",
-        "{player} beste Tore 2025",
-        "{player} Skills 2025",
-        "{player} Tore Zusammenfassung",
-        "{player} beste Momente 2025",
-        "{player} unglaubliche Tore",
-        "{player} Skills Zusammenfassung",
-        "{player} Top Plays 2025",
+    "soccer": [
+        "{player} highlights 2025",
+        "{player} best goals 2025",
+        "{player} skills 2025",
+        "{player} goals compilation",
+        "{player} best moments 2025",
+        "{player} amazing goals",
+        "{player} skills compilation",
+        "{player} top plays 2025",
     ],
     "nba": [
         "{player} highlights 2025",
@@ -169,39 +198,39 @@ PLAYER_QUERIES_HIGHLIGHTS = {
 }
 
 GENERIC_YT_QUERIES_HIGHLIGHTS = {
-    "fussball": [
-        "Fussball Highlights 2025",
-        "Bundesliga beste Tore 2025",
-        "Fussball beste Momente 2025",
-        "Fussball Skills Zusammenfassung 2025",
-        "Fussball unglaubliche Tore",
-        "Champions League Highlights 2025",
-        "Premier League Highlights 2025",
-        "Fussball Highlights Zusammenfassung",
+    "soccer": [
+        "soccer highlights 2025",
+        "football best goals 2025",
+        "soccer best moments 2025",
+        "football skills compilation 2025",
+        "soccer amazing goals",
+        "football highlights compilation",
+        "premier league highlights 2025",
+        "champions league highlights 2025",
     ],
     "nba": [
-        "NBA Highlights 2025",
-        "Basketball beste Plays 2025",
-        "NBA Dunks Zusammenfassung 2025",
-        "Basketball Highlights Zusammenfassung",
-        "NBA Top Plays 2025",
-        "Basketball unglaubliche Plays",
+        "NBA highlights 2025",
+        "basketball best plays 2025",
+        "NBA dunks compilation 2025",
+        "basketball highlights compilation",
+        "NBA top plays 2025",
+        "basketball amazing plays",
     ],
     "nfl": [
-        "NFL Highlights 2025",
-        "Football beste Plays 2025",
-        "NFL Touchdowns 2025",
-        "Football unglaubliche Plays",
-        "NFL Top Momente 2025",
+        "NFL highlights 2025",
+        "football best plays 2025",
+        "NFL touchdowns 2025",
+        "football amazing plays",
+        "NFL top moments 2025",
     ],
 }
 
 DAILYMOTION_QUERIES_HIGHLIGHTS = {
-    "fussball": [
+    "soccer": [
         "football highlights",
         "soccer goals compilation",
         "football best goals",
-        "fussball tore zusammenfassung",
+        "soccer match highlights",
     ],
     "nba": [
         "nba highlights",
@@ -218,9 +247,9 @@ DAILYMOTION_QUERIES_HIGHLIGHTS = {
 # ── Reddit Config ─────────────────────────────────────────────────────────────
 
 REDDIT_SUBREDDITS = {
-    "fussball": ["soccer", "bundesliga", "footballhighlights", "championsleague"],
-    "nba":      ["nba", "nbahighlights"],
-    "nfl":      ["nfl", "nflstreams"],
+    "soccer": ["soccer", "footballhighlights", "PremierLeague", "championsleague"],
+    "nba":    ["nba", "nbahighlights"],
+    "nfl":    ["nfl", "nflstreams"],
 }
 
 _REDDIT_VIDEO_DOMAINS = {
@@ -230,13 +259,14 @@ _REDDIT_VIDEO_DOMAINS = {
 }
 
 
-# ── Download-Helfer ───────────────────────────────────────────────────────────
+# ── Download Helpers ──────────────────────────────────────────────────────────
 
 def _ytdlp(query_or_url: str, output_dir: Path, before: set,
            is_search: bool = True, timeout: int = 90) -> Path | None:
-    """yt-dlp Suche oder direkter URL-Download."""
-    inp = f"ytsearch5:{query_or_url}" if is_search else query_or_url
-    logger.info(f"[clip] yt-dlp: {inp[:80]}")
+    # Use ytsearch10 and pick a random result (1-6) to avoid always getting the same clip
+    start = random.randint(1, 6) if is_search else 1
+    inp = f"ytsearch10:{query_or_url}" if is_search else query_or_url
+    logger.info(f"[clip] yt-dlp (start={start}): {inp[:80]}")
     cmd = [
         "yt-dlp", inp,
         "--match-filter", "duration < 360",
@@ -245,6 +275,7 @@ def _ytdlp(query_or_url: str, output_dir: Path, before: set,
         "-o", str(output_dir / "clip_%(id)s.%(ext)s"),
         "--no-playlist", "--quiet", "--no-warnings",
         "--max-downloads", "1",
+        "--playlist-start", str(start),
         "--socket-timeout", "20",
         "--retries", "3",
         "--no-check-certificate",
@@ -258,15 +289,15 @@ def _ytdlp(query_or_url: str, output_dir: Path, before: set,
         new = after - before
         if new:
             clip = sorted(new, key=lambda f: f.stat().st_mtime)[-1]
-            logger.info(f"[clip] Geladen: {clip.name} ({clip.stat().st_size/1024/1024:.1f} MB)")
+            logger.info(f"[clip] Downloaded: {clip.name} ({clip.stat().st_size/1024/1024:.1f} MB)")
             return clip
     except Exception as e:
-        logger.warning(f"[clip] yt-dlp Fehler: {e}")
+        logger.warning(f"[clip] yt-dlp error: {e}")
     return None
 
 
 def _dailymotion(query: str, output_dir: Path, before: set) -> Path | None:
-    """Dailymotion Public API — kein Key benötigt."""
+    """Dailymotion Public API — no key needed."""
     try:
         url = (
             "https://api.dailymotion.com/videos"
@@ -287,12 +318,12 @@ def _dailymotion(query: str, output_dir: Path, before: set) -> Path | None:
             if clip:
                 return clip
     except Exception as e:
-        logger.warning(f"[clip] Dailymotion Fehler: {e}")
+        logger.warning(f"[clip] Dailymotion error: {e}")
     return None
 
 
 def _pexels(query: str, output_dir: Path, before: set) -> Path | None:
-    """Pexels Video API — braucht PEXELS_API_KEY in Railway Variables."""
+    """Pexels Video API — needs PEXELS_API_KEY in Railway variables."""
     api_key = os.environ.get("PEXELS_API_KEY", "").strip()
     if not api_key:
         return None
@@ -320,7 +351,7 @@ def _pexels(query: str, output_dir: Path, before: set) -> Path | None:
                 if 360 <= f.get("height", 0) <= 1080:
                     dl_url = f["link"]
                     out = output_dir / f"clip_pexels_{video['id']}.mp4"
-                    logger.info(f"[clip] Pexels Download: {video['id']} ({f.get('height')}p)")
+                    logger.info(f"[clip] Pexels download: {video['id']} ({f.get('height')}p)")
                     dl = requests.get(dl_url, timeout=90, stream=True, verify=certifi.where())
                     if not dl.ok:
                         continue
@@ -332,14 +363,14 @@ def _pexels(query: str, output_dir: Path, before: set) -> Path | None:
                         return out
                     out.unlink(missing_ok=True)
     except Exception as e:
-        logger.warning(f"[clip] Pexels Fehler: {e}")
+        logger.warning(f"[clip] Pexels error: {e}")
     return None
 
 
 # ── Reddit Highlights ─────────────────────────────────────────────────────────
 
 def _reddit_token() -> str | None:
-    """Reddit OAuth2 Token via Client Credentials (kein User-Login nötig)."""
+    """Get Reddit OAuth2 token via client credentials (no user login needed)."""
     import base64
     import requests as _rq
     client_id     = os.environ.get("REDDIT_CLIENT_ID", "").strip()
@@ -357,24 +388,24 @@ def _reddit_token() -> str | None:
         )
         token = r.json().get("access_token")
         if token:
-            logger.info("[clip] Reddit OAuth2 Token OK")
+            logger.info("[clip] Reddit OAuth2 token OK")
         return token
     except Exception as e:
-        logger.warning(f"[clip] Reddit OAuth2 Fehler: {e}")
+        logger.warning(f"[clip] Reddit OAuth2 error: {e}")
         return None
 
 
 def _reddit(player: str, sport: str, output_dir: Path, before: set) -> Path | None:
     """
-    Browsed Sport-Subreddits nach Spieler-Highlight-Clips.
-    Nutzt OAuth2 (oauth.reddit.com) wenn REDDIT_CLIENT_ID/SECRET gesetzt —
-    umgeht den 403 den Railway-IPs auf dem anonymen Endpoint bekommen.
+    Browse sport subreddits for player-specific highlight clips.
+    Uses OAuth2 (oauth.reddit.com) when REDDIT_CLIENT_ID/SECRET are set —
+    bypasses the 403 Railway IPs get on the anonymous endpoint.
     """
     import requests as _rq
 
     subs = REDDIT_SUBREDDITS.get(sport, ["sports"])
 
-    # Nachname matchen — z.B. "Victor Wembanyama" → "wembanyama" suchen
+    # Match on last name — e.g. "Victor Wembanyama" → look for "wembanyama"
     player_words = [w.lower() for w in player.split() if len(w) > 3]
     match_words  = player_words[-1:] if player_words else player_words
 
@@ -417,9 +448,9 @@ def _reddit(player: str, sport: str, output_dir: Path, before: set) -> Path | No
                 if clip:
                     return clip
             except Exception as e:
-                logger.warning(f"[clip] Reddit r/{sub}/{sort} Fehler: {e}")
+                logger.warning(f"[clip] Reddit r/{sub}/{sort} error: {e}")
 
-    # Fallback: Reddit-Suche
+    # Fallback: search
     try:
         query = urllib.parse.quote(f"{player} highlights")
         posts = _fetch(
@@ -430,33 +461,33 @@ def _reddit(player: str, sport: str, output_dir: Path, before: set) -> Path | No
         if clip:
             return clip
     except Exception as e:
-        logger.warning(f"[clip] Reddit-Suche Fallback Fehler: {e}")
+        logger.warning(f"[clip] Reddit search fallback error: {e}")
 
     return None
 
 
-# ── Haupt-Funktion ────────────────────────────────────────────────────────────
+# ── Main Function ─────────────────────────────────────────────────────────────
 
 def fetch_clips(player: str, sport: str, output_dir: Path,
                 duration_hint: float = 60.0, count: int = 3,
                 mode: str = "youtube") -> list[Path]:
     """
-    3-stufige Suche — gibt leere Liste zurück wenn alles fehlschlägt.
-    mode="youtube"     → Pressekonferenz/Training-Clips (geringes Content-ID-Risiko)
-    mode="highlights"  → Highlights/Tore/Skills-Clips (nur TikTok/IG)
-    Kein Gradient-Fallback.
+    3-phase search — returns empty list if all phases fail.
+    mode="youtube"     → press conference / training clips (low Content ID risk)
+    mode="highlights"  → highlights / goals / skills clips (TikTok/IG only)
+    No gradient fallback.
     """
-    # Query-Dicts je nach Mode wählen
+    # Select query dicts based on mode
     if mode == "highlights":
         p_queries = PLAYER_QUERIES_HIGHLIGHTS
         g_queries = GENERIC_YT_QUERIES_HIGHLIGHTS
         d_queries = DAILYMOTION_QUERIES_HIGHLIGHTS
-        fallback_sport = "fussball"
+        fallback_sport = "soccer"
     else:
         p_queries = PLAYER_QUERIES
         g_queries = GENERIC_YT_QUERIES
         d_queries = DAILYMOTION_QUERIES
-        fallback_sport = "fussball"
+        fallback_sport = "soccer"
 
     output_dir.mkdir(exist_ok=True, parents=True)
     downloaded: list[Path] = []
@@ -467,7 +498,7 @@ def fetch_clips(player: str, sport: str, output_dir: Path,
             downloaded.append(clip)
             before.add(clip)
 
-    # ── Phase 1: YouTube, Spieler-spezifisch ─────────────────────────────────
+    # ── Phase 1: YouTube, player-specific ────────────────────────────────────
     if player and len(player.strip()) >= 3:
         templates = p_queries.get(sport, p_queries.get(fallback_sport, list(p_queries.values())[0]))
         queries = [t.format(player=player) for t in random.sample(templates, min(count + 1, len(templates)))]
@@ -476,17 +507,17 @@ def fetch_clips(player: str, sport: str, output_dir: Path,
                 break
             _add(_ytdlp(q, output_dir, before))
 
-    # ── Phase 1.5: Reddit Spieler-spezifische Highlights ─────────────────────
+    # ── Phase 1.5: Reddit player-specific highlights ──────────────────────────
     if len(downloaded) < count and player and len(player.strip()) >= 3:
-        logger.info(f"[clip] Phase 1.5: Reddit-Suche für '{player}'...")
+        logger.info(f"[clip] Phase 1.5: Reddit search for '{player}'...")
         for _ in range(count - len(downloaded)):
             if len(downloaded) >= count:
                 break
             _add(_reddit(player, sport, output_dir, before))
 
-    # ── Phase 2: YouTube generisch + Dailymotion ─────────────────────────────
+    # ── Phase 2: YouTube generic + Dailymotion ────────────────────────────────
     if len(downloaded) < count:
-        logger.info(f"[clip] Phase 1.5: {len(downloaded)}/{count} — starte Phase 2 (YouTube generisch + Dailymotion)...")
+        logger.info(f"[clip] Phase 1.5: {len(downloaded)}/{count} — starting Phase 2 (YouTube generic + Dailymotion)...")
 
         raw_generic = g_queries.get(sport, g_queries.get(fallback_sport, list(g_queries.values())[0]))
         yt_generic = [t.format(player=player) if player else t
@@ -503,9 +534,9 @@ def fetch_clips(player: str, sport: str, output_dir: Path,
                 break
             _add(_dailymotion(q, output_dir, before))
 
-    # ── Phase 3: Pexels Stock-Video ───────────────────────────────────────────
+    # ── Phase 3: Pexels Stock Video ───────────────────────────────────────────
     if len(downloaded) < count:
-        logger.info(f"[clip] Phase 2: {len(downloaded)}/{count} — starte Phase 3 (Pexels)...")
+        logger.info(f"[clip] Phase 2: {len(downloaded)}/{count} — starting Phase 3 (Pexels)...")
         px_queries = PEXELS_QUERIES.get(sport, ["sports"])
         for q in random.sample(px_queries, min(2, len(px_queries))):
             if len(downloaded) >= count:
@@ -513,9 +544,9 @@ def fetch_clips(player: str, sport: str, output_dir: Path,
             _add(_pexels(q, output_dir, before))
 
     if not downloaded:
-        logger.error(f"[clip] Alle 3 Phasen fehlgeschlagen für '{player}' ({sport}) mode={mode}")
+        logger.error(f"[clip] All 3 phases failed for '{player}' ({sport}) mode={mode}")
     else:
-        logger.info(f"[clip] {len(downloaded)} Clip(s) gefunden (mode={mode})")
+        logger.info(f"[clip] {len(downloaded)} clip(s) found (mode={mode})")
 
     return downloaded[:count]
 
@@ -551,8 +582,8 @@ def trim_clip(clip_path: Path, duration: float, output_path: Path) -> Path:
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
     if r.returncode != 0:
-        logger.warning(f"[clip] Trim-Fehler: {r.stderr[:200]}")
+        logger.warning(f"[clip] Trim error: {r.stderr[:200]}")
         import shutil
         shutil.copy(str(clip_path), str(output_path))
-    logger.info(f"[clip] Getrimmt: {output_path.name}")
+    logger.info(f"[clip] Trimmed: {output_path.name}")
     return output_path
