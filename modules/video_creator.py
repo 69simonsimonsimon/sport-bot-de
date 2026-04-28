@@ -146,7 +146,7 @@ def create_video(clip_path: Path, audio_path: Path, title: str,
             "-map", "[vout]",
             "-map", "1:a",
             # Video-Codec
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:v", "libx264", "-preset", "slow", "-crf", "18",
             "-r", "25",
             "-pix_fmt", "yuv420p",
             # Audio-Codec
