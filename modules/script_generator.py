@@ -14,6 +14,39 @@ import anthropic
 
 logger = logging.getLogger("syncin")
 
+_CLAUDE_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+
+
+def _llm_call(prompt: str, system: str = "", max_tokens: int = 900) -> str:
+    """Ruft Anthropic Claude auf — fällt auf OpenAI GPT-4o-mini zurück wenn Credits aufgebraucht."""
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if anthropic_key:
+        try:
+            client = anthropic.Anthropic(api_key=anthropic_key)
+            kwargs = {"model": _CLAUDE_MODEL, "max_tokens": max_tokens,
+                      "messages": [{"role": "user", "content": prompt}]}
+            if system:
+                kwargs["system"] = system
+            msg = client.messages.create(**kwargs)
+            return msg.content[0].text.strip()
+        except anthropic.BadRequestError as e:
+            if "credit balance" in str(e).lower():
+                logger.warning("[llm] Anthropic Credits aufgebraucht — OpenAI Fallback")
+            else:
+                raise
+    import openai
+    oai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if not oai_key:
+        raise RuntimeError("Weder Anthropic noch OpenAI API-Key verfügbar")
+    oai = openai.OpenAI(api_key=oai_key)
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    resp = oai.chat.completions.create(model="gpt-4o-mini", max_tokens=max_tokens, messages=messages)
+    return resp.choices[0].message.content.strip()
+
+
 _RAGE_BAIT_TRIGGERS = [
     "überschätzt", "der schlechteste", "muss sofort weg",
     "totaler Flop", "hat komplett versagt", "niemand will die Wahrheit hören",
@@ -42,7 +75,6 @@ def generate_script(article: dict, mode: str = "auto") -> dict:
     if mode == "auto":
         mode = random.choices(["news", "rage"], weights=[60, 40], k=1)[0]
 
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     sport = article.get("sport", "fussball")
 
     if mode == "rage":
@@ -96,13 +128,7 @@ SPIELER: ...
 HASHTAGS: ...
 CAPTION: ..."""
 
-    resp = client.messages.create(
-        model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
-        max_tokens=900,
-        system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    raw = resp.content[0].text.strip()
+    raw = _llm_call(prompt, system=_SYSTEM_PROMPT, max_tokens=900)
     logger.info(f"[script] Claude Response ({mode}): {raw[:100]}")
 
     def extract(key: str) -> str:
