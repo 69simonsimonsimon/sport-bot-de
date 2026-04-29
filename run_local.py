@@ -21,6 +21,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -40,6 +41,34 @@ logger = logging.getLogger("sportbot")
 OUTPUT_DIR = ROOT / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 (OUTPUT_DIR / "clips").mkdir(exist_ok=True)
+
+
+def _cleanup_stale_files():
+    """Löscht temp Dateien älter als 20 Min, die Crashes hinterlassen haben."""
+    cutoff = time.time() - 20 * 60
+    for pattern in ["audio_*.mp3", "video_*.mp4"]:
+        for f in OUTPUT_DIR.glob(pattern):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink(missing_ok=True)
+                    logger.info(f"🧹  Veraltete Datei gelöscht: {f.name}")
+            except Exception:
+                pass
+    # Auch veraltete Clip-Dateien löschen
+    clips_dir = OUTPUT_DIR / "clips"
+    for f in clips_dir.rglob("*.mp4"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+                logger.info(f"🧹  Veralteter Clip gelöscht: {f.name}")
+        except Exception:
+            pass
+    for f in clips_dir.rglob("*.txt"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def _bunny_upload(video_path: Path, filename: str, meta: dict) -> str:
@@ -75,6 +104,7 @@ def _fetch_trim_render(player: str, sport: str, stamp: str, mode: str,
     """
     Clips holen (mode='highlights' oder 'youtube'), trimmen, kombinieren, rendern.
     Gibt Pfad zum gerenderten Video zurück, oder None wenn keine Clips gefunden.
+    Alle Zwischendateien werden auch bei Fehlern aufgeräumt.
     """
     from clip_fetcher import fetch_clips, trim_clip
     from video_creator import create_video
@@ -91,41 +121,55 @@ def _fetch_trim_render(player: str, sport: str, stamp: str, mode: str,
 
     logger.info(f"    → {len(raw_clips)} Clip(s) gefunden")
 
-    # Trimmen
-    seg_dur = max(10.0, audio_duration / len(raw_clips))
     trimmed = []
-    for i, rc in enumerate(raw_clips):
-        t = clip_dir / f"trimmed_{stamp}_{i}.mp4"
-        trim_clip(rc, seg_dur, t)
-        trimmed.append(t)
-        rc.unlink(missing_ok=True)
+    combined = None
+    list_file = None
+    video_path = OUTPUT_DIR / f"video_{mode}_{stamp}.mp4"
 
-    # Kombinieren
-    if len(trimmed) == 1:
-        combined = trimmed[0]
-    else:
-        combined = clip_dir / f"combined_{stamp}.mp4"
-        list_file = clip_dir / f"list_{stamp}.txt"
-        list_file.write_text("\n".join(f"file '{str(t.resolve())}'" for t in trimmed))
-        subprocess.run(
-            ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-             "-i", str(list_file), "-c", "copy", str(combined)],
-            capture_output=True, timeout=120,
-        )
-        list_file.unlink(missing_ok=True)
+    try:
+        # Trimmen
+        seg_dur = max(10.0, audio_duration / len(raw_clips))
+        for i, rc in enumerate(raw_clips):
+            t = clip_dir / f"trimmed_{stamp}_{i}.mp4"
+            trim_clip(rc, seg_dur, t)
+            trimmed.append(t)
+            rc.unlink(missing_ok=True)
+
+        # Kombinieren
+        if len(trimmed) == 1:
+            combined = trimmed[0]
+        else:
+            combined = clip_dir / f"combined_{stamp}.mp4"
+            list_file = clip_dir / f"list_{stamp}.txt"
+            list_file.write_text("\n".join(f"file '{str(t.resolve())}'" for t in trimmed))
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", str(list_file), "-c", "copy", str(combined)],
+                capture_output=True, timeout=120,
+            )
+            if list_file:
+                list_file.unlink(missing_ok=True)
+            for t in trimmed:
+                t.unlink(missing_ok=True)
+            trimmed = []  # bereits gelöscht
+
+        # Rendern
+        logger.info(f"🎞️   Rendere {mode} Video...")
+        create_video(combined, audio_path, script["title"], video_path,
+                     script["sport"], words=tts_words)
+
+        mb = video_path.stat().st_size / 1024 / 1024
+        logger.info(f"    → {video_path.name} ({mb:.1f} MB)")
+        return video_path
+
+    finally:
+        # Immer Zwischendateien aufräumen
+        if combined is not None:
+            combined.unlink(missing_ok=True)
+        if list_file is not None:
+            list_file.unlink(missing_ok=True)
         for t in trimmed:
             t.unlink(missing_ok=True)
-
-    # Rendern
-    logger.info(f"🎞️   Rendere {mode} Video...")
-    video_path = OUTPUT_DIR / f"video_{mode}_{stamp}.mp4"
-    create_video(combined, audio_path, script["title"], video_path,
-                 script["sport"], words=tts_words)
-    combined.unlink(missing_ok=True)
-
-    mb = video_path.stat().st_size / 1024 / 1024
-    logger.info(f"    → {video_path.name} ({mb:.1f} MB)")
-    return video_path
 
 
 def generate_and_queue(sport: str = None) -> bool:
@@ -134,104 +178,112 @@ def generate_and_queue(sport: str = None) -> bool:
     from tts_generator import generate_tts
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
-
-    # 1. News
-    logger.info("📰  Hole News...")
-    article = fetch_news(sport)
-    logger.info(f"    → {article['title'][:70]}")
-
-    # 2. Script
-    logger.info("✍️   Generiere Script...")
-    script = generate_script(article)
-    logger.info(f"    → {script['title'][:60]}  [{script['sport']} / {script['mode']}]")
-
-    # 3. TTS
-    logger.info("🎙️   Generiere Voiceover...")
     audio_path = OUTPUT_DIR / f"audio_{stamp}.mp3"
-    generate_tts(script["tts_text"], audio_path, voice="onyx")
 
-    probe = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)],
-        capture_output=True, text=True, timeout=15,
-    )
-    audio_duration = float(probe.stdout.strip()) if probe.stdout.strip() else 60.0
-    logger.info(f"    → {audio_duration:.1f}s Audio")
-
-    # 3b. Whisper Karaoke-Timestamps
-    logger.info("📝  Transkribiere für Karaoke...")
-    tts_words = []
     try:
-        import openai
-        wc = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
-        with open(str(audio_path), "rb") as af:
-            tr = wc.audio.transcriptions.create(
-                model="whisper-1", file=af,
-                response_format="verbose_json",
-                timestamp_granularities=["word"],
-            )
-        tts_words = [{"word": w.word, "start": w.start, "end": w.end}
-                     for w in (tr.words or [])]
-        logger.info(f"    → {len(tts_words)} Wörter")
-    except Exception as e:
-        logger.warning(f"    Whisper fehlgeschlagen (kein Karaoke): {e}")
+        # 1. News
+        logger.info("📰  Hole News...")
+        article = fetch_news(sport)
+        logger.info(f"    → {article['title'][:70]}")
 
-    meta_base = {
-        "title":   script["title"],
-        "caption": script["caption"],
-        "sport":   script["sport"],
-        "player":  script["player"],
-    }
+        # 2. Script
+        logger.info("✍️   Generiere Script...")
+        script = generate_script(article)
+        logger.info(f"    → {script['title'][:60]}  [{script['sport']} / {script['mode']}]")
 
-    success_count = 0
+        # 3. TTS
+        logger.info("🎙️   Generiere Voiceover...")
+        generate_tts(script["tts_text"], audio_path, voice="onyx")
 
-    # ── Video A: Highlights → TikTok + Instagram (de_<stamp>) ─────────────────
-    logger.info("\n── Video A: Highlights (TikTok + Instagram) ──────────────────")
-    video_hl = _fetch_trim_render(
-        script["player"], script["sport"], stamp,
-        mode="highlights",
-        audio_path=audio_path,
-        audio_duration=audio_duration,
-        tts_words=tts_words,
-        script=script,
-    )
-    if video_hl:
-        filename_hl = f"de_{stamp}.mp4"
-        cdn = _bunny_upload(video_hl, filename_hl, dict(meta_base))
-        video_hl.unlink(missing_ok=True)
-        logger.info(f"✅  In Queue: {filename_hl}  ({cdn})")
-        success_count += 1
-    else:
-        logger.warning("⚠️   Highlights-Video übersprungen — keine Clips")
+        probe = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(audio_path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        audio_duration = float(probe.stdout.strip()) if probe.stdout.strip() else 60.0
+        logger.info(f"    → {audio_duration:.1f}s Audio")
 
-    # ── Video B: Pressekonferenz/Training → YouTube only (de_yt_<stamp>) ──────
-    logger.info("\n── Video B: Pressekonferenz (YouTube) ────────────────────────")
-    video_yt = _fetch_trim_render(
-        script["player"], script["sport"], f"{stamp}_yt",
-        mode="youtube",
-        audio_path=audio_path,
-        audio_duration=audio_duration,
-        tts_words=tts_words,
-        script=script,
-    )
-    if video_yt:
-        filename_yt = f"de_yt_{stamp}.mp4"
-        cdn = _bunny_upload(video_yt, filename_yt, dict(meta_base))
-        video_yt.unlink(missing_ok=True)
-        logger.info(f"✅  In Queue: {filename_yt}  ({cdn})")
-        success_count += 1
-    else:
-        logger.warning("⚠️   YouTube-Video übersprungen — keine Clips")
+        # 3b. Whisper Karaoke-Timestamps
+        logger.info("📝  Transkribiere für Karaoke...")
+        tts_words = []
+        try:
+            import openai
+            wc = openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+            with open(str(audio_path), "rb") as af:
+                tr = wc.audio.transcriptions.create(
+                    model="whisper-1", file=af,
+                    response_format="verbose_json",
+                    timestamp_granularities=["word"],
+                )
+            tts_words = [{"word": w.word, "start": w.start, "end": w.end}
+                         for w in (tr.words or [])]
+            logger.info(f"    → {len(tts_words)} Wörter")
+        except Exception as e:
+            logger.warning(f"    Whisper fehlgeschlagen (kein Karaoke): {e}")
 
-    # Audio aufräumen
-    audio_path.unlink(missing_ok=True)
+        meta_base = {
+            "title":   script["title"],
+            "caption": script["caption"],
+            "sport":   script["sport"],
+            "player":  script["player"],
+        }
 
-    logger.info(f"\n🏁  {success_count}/2 Videos in Queue für '{script['title'][:50]}'")
-    return success_count > 0
+        success_count = 0
+
+        # ── Video A: Highlights → TikTok + Instagram (de_<stamp>) ─────────────────
+        logger.info("\n── Video A: Highlights (TikTok + Instagram) ──────────────────")
+        video_hl = _fetch_trim_render(
+            script["player"], script["sport"], stamp,
+            mode="highlights",
+            audio_path=audio_path,
+            audio_duration=audio_duration,
+            tts_words=tts_words,
+            script=script,
+        )
+        if video_hl:
+            try:
+                filename_hl = f"de_{stamp}.mp4"
+                cdn = _bunny_upload(video_hl, filename_hl, dict(meta_base))
+                logger.info(f"✅  In Queue: {filename_hl}  ({cdn})")
+                success_count += 1
+            finally:
+                video_hl.unlink(missing_ok=True)
+        else:
+            logger.warning("⚠️   Highlights-Video übersprungen — keine Clips")
+
+        # ── Video B: Pressekonferenz/Training → YouTube only (de_yt_<stamp>) ──────
+        logger.info("\n── Video B: Pressekonferenz (YouTube) ────────────────────────")
+        video_yt = _fetch_trim_render(
+            script["player"], script["sport"], f"{stamp}_yt",
+            mode="youtube",
+            audio_path=audio_path,
+            audio_duration=audio_duration,
+            tts_words=tts_words,
+            script=script,
+        )
+        if video_yt:
+            try:
+                filename_yt = f"de_yt_{stamp}.mp4"
+                cdn = _bunny_upload(video_yt, filename_yt, dict(meta_base))
+                logger.info(f"✅  In Queue: {filename_yt}  ({cdn})")
+                success_count += 1
+            finally:
+                video_yt.unlink(missing_ok=True)
+        else:
+            logger.warning("⚠️   YouTube-Video übersprungen — keine Clips")
+
+        logger.info(f"\n🏁  {success_count}/2 Videos in Queue für '{script['title'][:50]}'")
+        return success_count > 0
+
+    finally:
+        # Audio immer löschen, egal was passiert
+        audio_path.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
     import concurrent.futures
+    _cleanup_stale_files()
+
     sport   = sys.argv[1] if len(sys.argv) > 1 else None
     count   = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     workers = min(count, int(sys.argv[3]) if len(sys.argv) > 3 else 2)
