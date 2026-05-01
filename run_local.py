@@ -176,6 +176,7 @@ def generate_and_queue(sport: str = None) -> bool:
     from news_scraper import fetch_news
     from script_generator import generate_script
     from tts_generator import generate_tts
+    from quality_check import quality_check
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S%f")[:-3]
     audio_path = OUTPUT_DIR / f"audio_{stamp}.mp3"
@@ -190,6 +191,19 @@ def generate_and_queue(sport: str = None) -> bool:
         logger.info("✍️   Generiere Script...")
         script = generate_script(article)
         logger.info(f"    → {script['title'][:60]}  [{script['sport']} / {script['mode']}]")
+
+        # 2b. KI-Qualitätsprüfung
+        logger.info("🤖  KI-Qualitätsprüfung...")
+        approved, reason = quality_check(
+            title=script["title"],
+            content=script["tts_text"],
+            context=f"{script['sport']} / {script.get('player', '')}",
+            lang="de",
+        )
+        logger.info(f"    → {reason}")
+        if not approved:
+            logger.info("    ❌  Abgelehnt — dieses Video wird übersprungen")
+            return False
 
         # 3. TTS
         logger.info("🎙️   Generiere Voiceover...")
