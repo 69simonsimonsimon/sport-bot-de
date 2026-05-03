@@ -1,7 +1,7 @@
 """
-Video Creator — Sport Bot DE
-Single-Pass: Video-Loop + Filter + Audio in EINEM ffmpeg-Aufruf.
-Modernes minimales Design: sauberes Overlay, kein Badge, Text-Stroke Karaoke.
+Video Creator — Sport Bot EN
+Single-Pass: Video loop + filter + audio in ONE ffmpeg call.
+Modern minimal design: clean overlay, no badge, text-stroke karaoke.
 """
 
 import logging
@@ -39,16 +39,38 @@ def _sanitize(text: str) -> str:
     return " ".join(text.split()).strip()
 
 
+import random as _random
+
+_SPORT_HOOKS = {
+    "soccer": ["Das ist absolut unreal ⚽👀", "Fussball-Fans muessen das sehen 😱", "Das hat niemand kommen sehen ⚽🔥"],
+    "nba":    ["Dieser Spielzug ist WAHNSINN 🏀😱", "NBA-Fans werden das nicht glauben 👀", "Groesster Moment dieser Saison 🏀🔥"],
+    "nfl":    ["Das aendert alles 🏈😱", "NFL-Fans muessen das sehen 👀", "Der wahnsinnigste Spielzug 🏈🔥"],
+}
+_DEFAULT_HOOKS_SPORT = ["Warte drauf 👀🔥", "Das wirst du nicht glauben 😱", "Das ist wirklich passiert 🔥"]
+
+_SPORT_QUESTIONS = {
+    "soccer": "Wer hatte Recht? Kommentar 👇",
+    "nba":    "Bester Spielzug dieser Saison? Kommentar 👇",
+    "nfl":    "Was denkst du? Kommentar 👇",
+}
+_DEFAULT_QUESTION_SPORT = "Was denkst du? Kommentar 👇"
+
+
 def create_video(clip_path: Path, audio_path: Path, title: str,
-                 output_path: Path, sport: str = "fussball",
+                 output_path: Path, sport: str = "soccer",
                  words: list = None) -> Path:
 
     audio_dur = _get_duration(audio_path)
     clip_dur  = _get_duration(clip_path)
     logger.info(f"[video] Audio: {audio_dur:.1f}s | Clip: {clip_dur:.1f}s")
 
-    # Einzelne Akzentfarbe pro Sport — nur für dünne Toplinie
-    accent = {"fussball": "0x00AAFF", "nba": "0xFF6B00", "nfl": "0x00CC55"}.get(sport, "0xFFFFFF")
+    hook_text     = _random.choice(_SPORT_HOOKS.get(sport, _DEFAULT_HOOKS_SPORT))
+    comment_q     = _SPORT_QUESTIONS.get(sport, _DEFAULT_QUESTION_SPORT)
+    hook_end      = 2.5
+    cta_start     = max(0, audio_dur - 2.5)
+
+    # Single accent color per sport — used only for thin top line
+    accent = {"soccer": "0x00AAFF", "nba": "0xFF6B00", "nfl": "0x00CC55"}.get(sport, "0xFFFFFF")
 
     font = ""
     for fp in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -61,7 +83,7 @@ def create_video(clip_path: Path, audio_path: Path, title: str,
 
     karaoke_y = H - 300
 
-    # ── Karaoke-Filter — Text-Stroke, keine Box ────────────────────────────
+    # ── Karaoke word filters — text stroke, no box ─────────────────────────
     karaoke_filters = []
     if words:
         for w in words:
@@ -79,19 +101,36 @@ def create_video(clip_path: Path, audio_path: Path, title: str,
                 f":borderw=4:bordercolor=black@1.0"
                 f":x=(w-text_w)/2:y={karaoke_y}"
             )
-        logger.info(f"[video] Karaoke: {len(karaoke_filters)} Wort-Filter")
+        logger.info(f"[video] Karaoke: {len(karaoke_filters)} word filters")
+
+    hook_safe = _sanitize(hook_text)
+    cta_safe  = _sanitize(comment_q)
 
     vf_parts = [
-        # Skalierung auf Portrait
+        # Scale to portrait
         f"scale={W}:{H}:force_original_aspect_ratio=decrease",
         f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black",
-        # Einzelnes sauberes Overlay
+        # Single clean dark overlay
         f"drawbox=x=0:y=0:w={W}:h={H}:color=black@0.40:t=fill",
-        # Unten etwas dunkler für Lesbarkeit
+        # Bottom gradient — just 2 layers for subtitle readability
         f"drawbox=x=0:y={int(H*0.50)}:w={W}:h={int(H*0.50)}:color=black@0.28:t=fill",
         f"drawbox=x=0:y={int(H*0.70)}:w={W}:h={int(H*0.30)}:color=black@0.20:t=fill",
-        # Dünne Akzentlinie oben
+        # Thin accent line at top only
         f"drawbox=x=0:y=0:w={W}:h=4:color={accent}@1.0:t=fill",
+        # Hook overlay: first 2.5s — centered, dark bg box + white text
+        f"drawbox=x=0:y={int(H*0.40)}:w={W}:h=130:color=black@0.75:t=fill"
+        f":enable='between(t,0,{hook_end})'",
+        f"drawtext=text='{hook_safe}'{fa}"
+        f":enable='between(t,0,{hook_end})'"
+        f":fontsize=58:fontcolor=white:borderw=3:bordercolor=black@1.0"
+        f":x=(w-text_w)/2:y={int(H*0.42)}",
+        # Comment-bait CTA: last 2.5s — yellow text centered
+        f"drawbox=x=0:y={int(H*0.48)}:w={W}:h=110:color=black@0.75:t=fill"
+        f":enable='gte(t,{cta_start:.1f})'",
+        f"drawtext=text='{cta_safe}'{fa}"
+        f":enable='gte(t,{cta_start:.1f})'"
+        f":fontsize=52:fontcolor=0xFFE600:borderw=3:bordercolor=black@1.0"
+        f":x=(w-text_w)/2:y={int(H*0.50)}",
     ]
     vf_parts.extend(karaoke_filters)
     vf = ",".join(vf_parts)
@@ -123,17 +162,17 @@ def create_video(clip_path: Path, audio_path: Path, title: str,
         ], timeout=480)
 
         if r.returncode != 0:
-            logger.error(f"[video] ffmpeg Fehler:\n{r.stderr[-800:]}")
-            raise RuntimeError(f"ffmpeg fehlgeschlagen: {r.stderr[-200:]}")
+            logger.error(f"[video] ffmpeg error:\n{r.stderr[-800:]}")
+            raise RuntimeError(f"ffmpeg failed: {r.stderr[-200:]}")
 
     finally:
         list_file.unlink(missing_ok=True)
 
     mb = output_path.stat().st_size / 1024 / 1024
-    logger.info(f"[video] Fertig: {output_path.name} ({mb:.1f} MB)")
+    logger.info(f"[video] Done: {output_path.name} ({mb:.1f} MB)")
 
     actual_dur = _get_duration(output_path)
     if actual_dur < 20.0:
-        raise RuntimeError(f"Video zu kurz ({actual_dur:.1f}s)")
+        raise RuntimeError(f"Video too short ({actual_dur:.1f}s)")
 
     return output_path
