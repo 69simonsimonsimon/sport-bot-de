@@ -8,6 +8,8 @@ Filtert nach Relevanz und vermeidet Duplikate.
 import json
 import logging
 import random
+import time
+import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -34,6 +36,88 @@ FEEDS = {
         "https://news.google.com/rss/search?q=NFL+touchdown&hl=de&gl=DE&ceid=DE:de",
     ],
 }
+
+# Sport weights for random selection
+SPORT_WEIGHTS = {"fussball": 50, "nba": 30, "nfl": 20}
+
+# Trend cache: refreshed every 60 minutes
+_trend_cache = {"weights": None, "ts": 0}
+
+
+def _get_trending_weights() -> dict:
+    """
+    Returns sport weights boosted by Google Trends and recent article counts.
+    Falls back to SPORT_WEIGHTS on any error. Caches result for 60 minutes.
+    """
+    global _trend_cache
+    now = time.time()
+    if _trend_cache["weights"] is not None and now - _trend_cache["ts"] < 3600:
+        return _trend_cache["weights"]
+
+    weights = dict(SPORT_WEIGHTS)
+
+    try:
+        # ── Step 1: Google Trends daily RSS boost ──────────────────────────
+        trends_url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=DE"
+        req = urllib.request.Request(trends_url, headers={"User-Agent": "Mozilla/5.0 (compatible; SportBot/1.0)"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            trends_xml = resp.read().decode("utf-8", errors="replace").lower()
+
+        fussball_keywords = ["fußball", "bundesliga", "fussball", "football", "champions league"]
+        nba_keywords = ["nba", "basketball"]
+        nfl_keywords = ["nfl"]
+
+        for kw in fussball_keywords:
+            if kw in trends_xml:
+                weights["fussball"] = weights.get("fussball", 0) + 15
+                logger.info(f"[news] Trends boost: fussball +15 ({kw})")
+                break
+        for kw in nba_keywords:
+            if kw in trends_xml:
+                weights["nba"] = weights.get("nba", 0) + 15
+                logger.info(f"[news] Trends boost: nba +15 ({kw})")
+                break
+        for kw in nfl_keywords:
+            if kw in trends_xml:
+                weights["nfl"] = weights.get("nfl", 0) + 15
+                logger.info(f"[news] Trends boost: nfl +15 ({kw})")
+                break
+
+    except Exception as e:
+        logger.warning(f"[news] Trends fetch failed: {e}")
+
+    try:
+        # ── Step 2: Recent article count bonus (up to +10 per sport) ───────
+        cutoff = datetime.utcnow() - timedelta(hours=48)
+        for sport, feed_list in FEEDS.items():
+            if not feed_list:
+                continue
+            first_url = feed_list[0]
+            try:
+                headers = {"User-Agent": "Mozilla/5.0 (compatible; SportBot/1.0)"}
+                resp = requests.get(first_url, headers=headers, timeout=8)
+                feed = feedparser.parse(resp.content)
+                recent_count = 0
+                for entry in feed.entries:
+                    published = entry.get("published_parsed") or entry.get("updated_parsed")
+                    if published:
+                        pub_dt = datetime(*published[:6])
+                        if pub_dt >= cutoff:
+                            recent_count += 1
+                bonus = min(recent_count, 10)
+                if bonus > 0:
+                    weights[sport] = weights.get(sport, 0) + bonus
+                    logger.info(f"[news] Recent-articles bonus: {sport} +{bonus} ({recent_count} Artikel < 48h)")
+            except Exception as e:
+                logger.debug(f"[news] Recent-articles check failed for {sport}: {e}")
+
+    except Exception as e:
+        logger.warning(f"[news] Recent-articles bonus failed: {e}")
+
+    _trend_cache["weights"] = weights
+    _trend_cache["ts"] = now
+    return weights
+
 
 # Schlüsselwörter für Rage-Bait Potenzial
 SPICY_KEYWORDS = [
@@ -109,13 +193,13 @@ def fetch_news(sport: str = None) -> dict:
     """
     used = _load_used()
 
-    # Sport wählen (gewichtet: Fußball häufiger)
+    # Sport wählen (dynamisch gewichtet via Trends)
     if sport is None:
-        sport = random.choices(
-            ["fussball", "nba", "nfl"],
-            weights=[50, 30, 20],
-            k=1
-        )[0]
+        w = _get_trending_weights()
+        sports = list(w.keys())
+        weights = list(w.values())
+        sport = random.choices(sports, weights=weights, k=1)[0]
+        logger.info(f"[news] Dynamic weights: {w} → picked {sport}")
 
     feeds = FEEDS.get(sport, FEEDS["fussball"])
     random.shuffle(feeds)
