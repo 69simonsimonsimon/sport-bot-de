@@ -96,12 +96,12 @@ ARTIKELINHALT: {content}
 SPORTART: {sport.upper()}
 {facts_warning}
 
-Schreib ein KONTROVERSES TikTok-Voiceover-Script auf Deutsch. Das Script MUSS genau 110-140 Wörter haben.
-Anforderungen:
-1. Beginnt mit einem STARKEN Statement basierend auf den echten Fakten
-2. Kommentiere was im Artikel steht — KNALLHART aber faktenbasiert
-3. Darf provokant sein ("Das will niemand zugeben, aber...") — solange es auf echten Infos basiert
-4. Endet mit "Schreibt eure Meinung in die Kommentare!"
+Schreib ein KONTROVERSES TikTok-Voiceover-Script auf Deutsch. Das Script MUSS genau 140-160 Wörter haben.
+STRUKTUR (diese Reihenfolge einhalten!):
+1. HOOK (Satz 1-2): Die schockierendste oder provokanteste Aussage aus dem Artikel ZUERST. Muss so stark sein dass man aufhört zu scrollen. Direkte Ansprache: "Das glaubst du nicht..." / "Alle reden davon..." / "Niemand will zugeben..."
+2. AUFBAU (Satz 3-5): Kontext der den Schock noch größer macht. Konkrete Zahlen/Fakten aus dem Artikel.
+3. MEINUNG (Satz 6-8): Deine harte, klare Einschätzung — provokant aber faktenbasiert. Darf spaltend sein.
+4. CLIFFHANGER (letzter Satz): Endet mit "Schreibt eure Meinung in die Kommentare!"
 
 Danach diese Metadaten:
 TITEL: (klickbarer Titel mit Emojis, max 60 Zeichen)
@@ -122,12 +122,12 @@ ARTIKELINHALT: {content}
 SPORTART: {sport.upper()}
 {facts_warning}
 
-Schreib einen SPANNENDEN TikTok-Voiceover-Kommentar auf Deutsch. Das Script MUSS genau 110-140 Wörter haben.
-Anforderungen:
-1. Beginnt mit einem starken HOOK basierend auf den echten Fakten
-2. Erklärt was wirklich passiert ist — klar, direkt, meinungsstark
-3. Kühne Prognose oder Bewertung — aber als Meinung gekennzeichnet
-4. Endet mit "Was denkt ihr? Kommentiert!"
+Schreib einen SPANNENDEN TikTok-Voiceover-Kommentar auf Deutsch. Das Script MUSS genau 140-160 Wörter haben.
+STRUKTUR (diese Reihenfolge einhalten!):
+1. HOOK (Satz 1-2): Die überraschendste oder unglaublichste Tatsache aus dem Artikel ZUERST. Scroll-stopper: "Das hat niemand kommen sehen..." / "Jetzt ist es offiziell..." / "Das ändert alles..."
+2. AUFBAU (Satz 3-5): Was ist passiert? Erkläre den Hintergrund mit konkreten Fakten aus dem Artikel.
+3. ANALYSE (Satz 6-8): Deine Einschätzung was das bedeutet — mutig, direkt, als Meinung gekennzeichnet.
+4. CALL TO ACTION (letzter Satz): Endet mit "Was denkt ihr? Kommentiert!"
 
 Danach diese Metadaten:
 TITEL: (klickbarer Titel mit Emojis, max 60 Zeichen)
@@ -164,11 +164,10 @@ CAPTION: ..."""
     word_count = len(tts_text.split())
     logger.info(f"[script] Script: {word_count} Wörter, Modus: {mode}, Spieler: {player}")
 
-    if word_count < 100:
+    if word_count < 120:
         raise ValueError(f"Script zu kurz ({word_count} Wörter)")
-    if word_count > 160:
-        # Kürzen
-        words = tts_text.split()[:155]
+    if word_count > 170:
+        words = tts_text.split()[:165]
         tts_text = " ".join(words) + "."
 
     return {
