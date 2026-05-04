@@ -157,6 +157,24 @@ CAPTION: ..."""
 
     title      = extract("TITEL") or article["title"][:60]
     player     = extract("SPIELER") or ""
+
+    # Player-Fallback: wenn leer oder zu lang (wahrscheinlich Fehler),
+    # extrahiere Hauptnamen aus dem Artikel-Titel
+    if not player or len(player.split()) > 5:
+        # Suche nach großgeschriebenen Wörtern (Namen/Teams) im Titel
+        import re as _re
+        _words = article["title"].split()
+        _candidates = [w.strip(".,!?-") for w in _words if w[0].isupper() and len(w) > 3
+                       and w.lower() not in {"der", "die", "das", "den", "dem", "ein", "eine",
+                                              "ist", "hat", "nach", "beim", "wird", "auch",
+                                              "für", "von", "mit", "aus", "über", "bei"}]
+        if _candidates:
+            # Nehme erstes gefundenes als primären Suchbegriff
+            player = " ".join(_candidates[:2])
+        else:
+            player = {"fussball": "soccer player", "nba": "NBA player", "nfl": "NFL player"}.get(sport, "sports player")
+    logger.info(f"[script] Player nach Fallback: '{player}'")
+
     hashtags   = extract("HASHTAGS") or "#sport #fussball #bundesliga #nba #nfl #fyp"
     caption    = extract("CAPTION") or f"{title}\n{hashtags}"
 
