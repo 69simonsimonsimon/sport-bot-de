@@ -77,27 +77,40 @@ def generate_script(article: dict, mode: str = "auto") -> dict:
 
     sport = article.get("sport", "fussball")
 
+    # Artikelinhalt zusammenbauen — Volltext bevorzugen
+    fulltext = article.get("fulltext", "").strip()
+    summary  = article.get("summary", "").strip()
+    content  = fulltext if len(fulltext) > len(summary) else summary
+    if not content:
+        content = "(nur Überschrift verfügbar)"
+
+    facts_warning = """
+⚠️ WICHTIGE REGEL: Erfinde KEINE Fakten, Zahlen, Zitate oder Details die nicht explizit im Artikel stehen!
+Wenn du eine Meinung äußerst, mach deutlich dass es DEINE Einschätzung ist ("Ich glaube...", "Meiner Meinung nach...").
+Halte dich an die Fakten aus dem Artikel — du darfst sie kommentieren und bewerten, aber nicht erfinden."""
+
     if mode == "rage":
         prompt = f"""Basierend auf dieser Sport-News:
 TITEL: {article['title']}
-INHALT: {article['summary']}
+ARTIKELINHALT: {content}
 SPORTART: {sport.upper()}
+{facts_warning}
 
-Schreib ein KONTROVERSES TikTok-Voiceover-Script auf Deutsch. Das Script MUSS genau 120-150 Wörter haben — zähl sorgfältig.
+Schreib ein KONTROVERSES TikTok-Voiceover-Script auf Deutsch. Das Script MUSS genau 110-140 Wörter haben.
 Anforderungen:
-1. Beginnt mit einem SCHOCKIERENDEN Statement (keine Frage, direkt eine Meinung)
-2. Kritisiert oder verteidigt den Spieler/Verein KNALLHART
-3. Baut einen Rage-Bait-Moment ein ("Das will niemand zugeben, aber...")
+1. Beginnt mit einem STARKEN Statement basierend auf den echten Fakten
+2. Kommentiere was im Artikel steht — KNALLHART aber faktenbasiert
+3. Darf provokant sein ("Das will niemand zugeben, aber...") — solange es auf echten Infos basiert
 4. Endet mit "Schreibt eure Meinung in die Kommentare!"
 
 Danach diese Metadaten:
-TITEL: (klickbarer YouTube-Titel mit Emojis, max 60 Zeichen)
-SPIELER: (Hauptperson/Team für Clip-Suche)
+TITEL: (klickbarer Titel mit Emojis, max 60 Zeichen)
+SPIELER: (Hauptperson/Team aus dem Artikel für Clip-Suche)
 HASHTAGS: (6 relevante Hashtags)
 CAPTION: (1 Satz + Hashtags)
 
 Antworte GENAU in diesem Format:
-SCRIPT: [dein 120-150 Wörter Script hier]
+SCRIPT: [dein Script hier]
 TITEL: ...
 SPIELER: ...
 HASHTAGS: ...
@@ -105,24 +118,25 @@ CAPTION: ..."""
     else:
         prompt = f"""Basierend auf dieser Sport-News:
 TITEL: {article['title']}
-INHALT: {article['summary']}
+ARTIKELINHALT: {content}
 SPORTART: {sport.upper()}
+{facts_warning}
 
-Schreib einen SPANNENDEN TikTok-Voiceover-Kommentar auf Deutsch. Das Script MUSS genau 120-150 Wörter haben — zähl sorgfältig.
+Schreib einen SPANNENDEN TikTok-Voiceover-Kommentar auf Deutsch. Das Script MUSS genau 110-140 Wörter haben.
 Anforderungen:
-1. Beginnt mit einem starken HOOK der sofort fesselt
-2. Erklärt die wichtigsten Fakten mit einer klaren, meinungsstarken Note
-3. Enthält eine überraschende Einschätzung oder kühne Prognose
+1. Beginnt mit einem starken HOOK basierend auf den echten Fakten
+2. Erklärt was wirklich passiert ist — klar, direkt, meinungsstark
+3. Kühne Prognose oder Bewertung — aber als Meinung gekennzeichnet
 4. Endet mit "Was denkt ihr? Kommentiert!"
 
 Danach diese Metadaten:
-TITEL: (klickbarer YouTube-Titel mit Emojis, max 60 Zeichen)
-SPIELER: (Hauptperson/Team für Clip-Suche)
+TITEL: (klickbarer Titel mit Emojis, max 60 Zeichen)
+SPIELER: (Hauptperson/Team aus dem Artikel für Clip-Suche)
 HASHTAGS: (6 relevante Hashtags)
 CAPTION: (1 Satz + Hashtags)
 
 Antworte GENAU in diesem Format:
-SCRIPT: [dein 120-150 Wörter Script hier]
+SCRIPT: [dein Script hier]
 TITEL: ...
 SPIELER: ...
 HASHTAGS: ...

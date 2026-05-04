@@ -142,8 +142,35 @@ def _save_used(used: set):
     USED_ARTICLES_FILE.write_text(json.dumps(entries), encoding="utf-8")
 
 
+def _fetch_article_text(url: str, max_chars: int = 2000) -> str:
+    """Versucht den Volltext eines Artikels zu scrapen."""
+    import re
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "de-DE,de;q=0.9",
+        }
+        resp = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        resp.raise_for_status()
+        html = resp.text
+
+        # Paragraphen extrahieren
+        paragraphs = re.findall(r"<p[^>]*>(.*?)</p>", html, re.DOTALL | re.IGNORECASE)
+        text = " ".join(re.sub(r"<[^>]+>", "", p).strip() for p in paragraphs)
+        text = re.sub(r"\s+", " ", text).strip()
+
+        # Mindestlänge prüfen — wenn zu kurz, ist es wahrscheinlich nur Navigation
+        if len(text) < 200:
+            return ""
+        return text[:max_chars]
+    except Exception as e:
+        logger.debug(f"Volltext-Fetch fehlgeschlagen für {url}: {e}")
+        return ""
+
+
 def _parse_feed(url: str) -> list[dict]:
-    """Parst einen RSS-Feed und gibt Artikel zurück."""
+    """Parst einen RSS-Feed und gibt Artikel mit Volltext zurück."""
+    import re
     try:
         headers = {"User-Agent": "Mozilla/5.0 (compatible; SportBot/1.0)"}
         resp = requests.get(url, headers=headers, timeout=15)
@@ -154,16 +181,21 @@ def _parse_feed(url: str) -> list[dict]:
             title   = entry.get("title", "").strip()
             summary = entry.get("summary", "") or entry.get("description", "")
             link    = entry.get("link", "")
-            # HTML-Tags entfernen
-            import re
             summary = re.sub(r"<[^>]+>", "", summary).strip()[:500]
-            if title and link:
-                articles.append({
-                    "title":   title,
-                    "summary": summary,
-                    "link":    link,
-                    "id":      link,
-                })
+
+            if not title or not link:
+                continue
+
+            # Volltext holen für bessere Fakten-Basis
+            fulltext = _fetch_article_text(link)
+
+            articles.append({
+                "title":    title,
+                "summary":  summary,
+                "fulltext": fulltext,   # neu: Volltext für Claude
+                "link":     link,
+                "id":       link,
+            })
         return articles
     except Exception as e:
         logger.warning(f"Feed-Fehler {url}: {e}")
