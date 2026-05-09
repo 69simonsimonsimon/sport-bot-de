@@ -142,8 +142,40 @@ def _save_used(used: set):
     USED_ARTICLES_FILE.write_text(json.dumps(entries), encoding="utf-8")
 
 
+def _fetch_article_text(url: str, max_chars: int = 800) -> str:
+    """
+    Ruft den eigentlichen Artikel-Text von der URL ab.
+    Wird verwendet wenn der RSS-Summary zu kurz ist (< 120 Zeichen).
+    Gibt leeren String bei Fehler zurück.
+    """
+    import re
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(url, headers=headers, timeout=10, allow_redirects=True)
+        resp.raise_for_status()
+        text = resp.text
+        # Skripte, Styles, Nav etc. entfernen
+        text = re.sub(r"<(script|style|nav|header|footer|aside|form)[^>]*>.*?</\1>",
+                      " ", text, flags=re.DOTALL | re.IGNORECASE)
+        # Alle HTML-Tags entfernen
+        text = re.sub(r"<[^>]+>", " ", text)
+        # Whitespace normalisieren
+        text = re.sub(r"\s+", " ", text).strip()
+        # Cookie-Banner & Co. filtern
+        if len(text) < 80:
+            return ""
+        return text[:max_chars]
+    except Exception as e:
+        logger.debug(f"[news] Artikel-Fetch fehlgeschlagen ({url[:60]}): {e}")
+        return ""
+
+
 def _parse_feed(url: str) -> list[dict]:
     """Parst einen RSS-Feed und gibt Artikel zurück."""
+    import re
     try:
         headers = {"User-Agent": "Mozilla/5.0 (compatible; SportBot/1.0)"}
         resp = requests.get(url, headers=headers, timeout=15)
@@ -155,8 +187,17 @@ def _parse_feed(url: str) -> list[dict]:
             summary = entry.get("summary", "") or entry.get("description", "")
             link    = entry.get("link", "")
             # HTML-Tags entfernen
-            import re
             summary = re.sub(r"<[^>]+>", "", summary).strip()[:500]
+            # Wenn Summary zu kurz: echten Artikel-Text holen
+            if len(summary) < 120 and link:
+                fetched = _fetch_article_text(link)
+                if fetched:
+                    logger.debug(f"[news] Summary kurz ({len(summary)}ch) → Artikel geholt ({len(fetched)}ch)")
+                    summary = fetched
+            # Artikel ohne Titel oder mit leerem Summary überspringen
+            if not title or len(summary.strip()) < 50:
+                logger.debug(f"[news] Überspringe leeren Artikel: '{title[:50]}'")
+                continue
             if title and link:
                 articles.append({
                     "title":   title,
